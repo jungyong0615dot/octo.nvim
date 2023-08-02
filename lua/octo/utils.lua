@@ -13,9 +13,9 @@ local repo_info_cache = {}
 local path_sep = package.config:sub(1, 1)
 
 M.viewed_state_map = {
-  DISMISSED = { icon = " ", hl = "OctoRed" },
-  VIEWED = { icon = "﫟", hl = "OctoGreen" },
-  UNVIEWED = { icon = " ", hl = "OctoBlue" },
+  DISMISSED = { icon = "󰀨 ", hl = "OctoRed" },
+  VIEWED = { icon = "󰗠", hl = "OctoGreen" },
+  UNVIEWED = { icon = "󰄰 ", hl = "OctoBlue" },
 }
 
 M.state_msg_map = {
@@ -168,20 +168,34 @@ function M.parse_remote_url(url, aliases)
   end
 end
 
-function M.get_remote()
+function M.parse_git_remote()
   local conf = config.get_config()
   local aliases = conf.ssh_aliases
-  for _, candidate in ipairs(conf.default_remote) do
-    local job = Job:new {
-      command = "git",
-      args = { "remote", "get-url", candidate },
-      cwd = vim.fn.getcwd(),
-    }
-    job:sync()
-    local url = table.concat(job:result(), "\n")
-    local stderr = table.concat(job:stderr_result(), "\n")
-    if M.is_blank(stderr) then
-      return M.parse_remote_url(url, aliases)
+  local job = Job:new { command = "git", args = { "remote", "-v" }, cwd = vim.fn.getcwd() }
+  job:sync()
+  local stderr = table.concat(job:stderr_result(), "\n")
+  if not M.is_blank(stderr) then
+    return {}
+  end
+  local remotes = {}
+  for _, line in ipairs(job:result()) do
+    local name, url = line:match "^(%S+)%s+(%S+)"
+    if name then
+      local remote = M.parse_remote_url(url, aliases)
+      if remote then
+        remotes[name] = remote
+      end
+    end
+  end
+  return remotes
+end
+
+function M.get_remote()
+  local conf = config.get_config()
+  local remotes = M.parse_git_remote()
+  for name, remote in pairs(remotes) do
+    if vim.tbl_contains(conf.default_remote, name) then
+      return remote
     end
   end
   -- return github.com as default host
@@ -189,6 +203,10 @@ function M.get_remote()
     host = "github.com",
     repo = nil,
   }
+end
+
+function M.get_all_remotes()
+  return vim.tbl_values(M.parse_git_remote())
 end
 
 function M.get_remote_name()
@@ -238,20 +256,17 @@ function M.in_pr_repo()
   local bufnr = vim.api.nvim_get_current_buf()
   local buffer = octo_buffers[bufnr]
   if not buffer then
-    M.notify("Not in Octo buffer", 2)
+    M.error "Not in Octo buffer"
     return
   end
   if not buffer:isPullRequest() then
-    M.notify("Not in Octo PR buffer", 2)
+    M.error "Not in Octo PR buffer"
     return
   end
 
   local local_repo = M.get_remote_name()
   if buffer.node.baseRepository.nameWithOwner ~= local_repo then
-    M.notify(
-      string.format("Not in PR repo. Expected %s, got %s", buffer.node.baseRepository.nameWithOwner, local_repo),
-      2
-    )
+    M.error(string.format("Not in PR repo. Expected %s, got %s", buffer.node.baseRepository.nameWithOwner, local_repo))
     return false
   else
     return true
@@ -265,7 +280,7 @@ function M.in_pr_branch(bufnr)
     return
   end
   if not buffer:isPullRequest() then
-    --M.notify("Not in Octo PR buffer", 2)
+    --M.error("Not in Octo PR buffer")
     return false
   end
 
@@ -280,11 +295,11 @@ function M.in_pr_branch(bufnr)
   if buffer.node.baseRepository.nameWithOwner == local_repo and buffer.node.headRefName == local_branch then
     return true
   elseif buffer.node.baseRepository.nameWithOwner ~= local_repo then
-    --M.notify(string.format("Not in PR repo. Expected %s, got %s", buffer.node.baseRepository.nameWithOwner, local_repo), 2)
+    --M.error(string.format("Not in PR repo. Expected %s, got %s", buffer.node.baseRepository.nameWithOwner, local_repo))
     return false
   elseif buffer.node.headRefName ~= local_branch then
     -- TODO: suggest to checkout the branch
-    --M.notify(string.format("Not in PR branch. Expected %s, got %s", buffer.node.headRefName, local_branch), 2)
+    --M.error(string.format("Not in PR branch. Expected %s, got %s", buffer.node.headRefName, local_branch))
     return false
   else
     return false
@@ -302,9 +317,24 @@ function M.checkout_pr(pr_number)
     args = { "pr", "checkout", pr_number },
     on_exit = vim.schedule_wrap(function()
       local output = vim.fn.system "git branch --show-current"
-      vim.notify("Switched to " .. output)
+      M.info("Switched to " .. output)
     end),
   }):start()
+end
+
+function M.checkout_pr_sync(pr_number)
+  if not Job then
+    return
+  end
+  Job:new({
+    enable_recording = true,
+    command = "gh",
+    args = { "pr", "checkout", pr_number },
+    on_exit = vim.schedule_wrap(function()
+      local output = vim.fn.system "git branch --show-current"
+      M.info("Switched to " .. output)
+    end),
+  }):sync()
 end
 
 ---Formats a string as a date
@@ -462,7 +492,7 @@ function M.get_repo_number_from_varargs(...)
   local repo, number
   local args = table.pack(...)
   if args.n == 0 then
-    M.notify("Missing arguments", 1)
+    M.error "Missing arguments"
     return
   elseif args.n == 1 then
     -- eg: Octo issue 1
@@ -473,15 +503,15 @@ function M.get_repo_number_from_varargs(...)
     repo = args[1]
     number = tonumber(args[2])
   else
-    M.notify("Unexpected arguments", 1)
+    M.error "Unexpected arguments"
     return
   end
   if not repo then
-    M.notify("Cant find repo name", 1)
+    M.error "Cant find repo name"
     return
   end
   if not number then
-    M.notify("Missing issue/PR number", 1)
+    M.error "Missing issue/PR number"
     return
   end
   return repo, number
@@ -548,7 +578,7 @@ function M.get_file_contents(repo, commit, path, cb)
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not M.is_blank(stderr) then
-        M.notify(stderr, 2)
+        M.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         local blob = resp.data.repository.object
@@ -586,8 +616,9 @@ end
 
 function M.cursor_in_col_range(start_col, end_col)
   local cursor = vim.api.nvim_win_get_cursor(0)
+  local col = cursor[2] + 1
   if start_col and end_col then
-    if start_col <= cursor[2] and cursor[2] <= end_col then
+    if start_col <= col and col <= end_col then
       return true
     end
   end
@@ -600,16 +631,44 @@ function M.split_repo(repo)
   return owner, name
 end
 
-function M.extract_pattern_at_cursor(pattern)
-  local current_line = vim.fn.getline "."
-  if current_line:find(pattern) then
-    local res = table.pack(current_line:find(pattern))
-    local start_col = res[1]
-    local end_col = res[2]
-    if M.cursor_in_col_range(start_col, end_col) then
-      return unpack(M.tbl_slice(res, 3, #res))
+function M.extract_pattern_at_cursor(pattern, line, offset)
+  line = line or vim.api.nvim_get_current_line()
+  offset = offset or 0
+  if offset > 0 and pattern:sub(1, 1) == "^" then
+    return
+  end
+  local res = table.pack(line:find(pattern))
+  if #res == 0 then
+    return
+  end
+  local start_col = res[1]
+  local end_col = res[2]
+  if M.cursor_in_col_range(offset + start_col, offset + end_col) then
+    return unpack(M.tbl_slice(res, 3, #res))
+  elseif end_col == #line then
+    return
+  end
+  return M.extract_pattern_at_cursor(pattern, line:sub(end_col + 1), offset + end_col)
+end
+
+function M.extract_issue_at_cursor(current_repo)
+  local repo, number = M.extract_pattern_at_cursor(constants.LONG_ISSUE_PATTERN)
+  if not repo or not number then
+    number = M.extract_pattern_at_cursor(constants.SHORT_ISSUE_PATTERN)
+    if number then
+      repo = current_repo
     end
   end
+  if not repo or not number then
+    number = M.extract_pattern_at_cursor(constants.SHORT_ISSUE_LINE_BEGGINING_PATTERN)
+    if number then
+      repo = current_repo
+    end
+  end
+  if not repo or not number then
+    repo, _, number = M.extract_pattern_at_cursor(constants.URL_ISSUE_PATTERN)
+  end
+  return repo, number
 end
 
 function M.pattern_split(str, pattern)
@@ -972,19 +1031,34 @@ function M.fork_repo()
   if not buffer or not buffer:isRepo() then
     return
   end
-  M.notify(string.format("Cloning %s. It can take a few minutes", buffer.repo), 1)
-  M.notify(vim.fn.system('echo "n" | gh repo fork ' .. buffer.repo .. " 2>&1 | cat "), 1)
+  M.info(string.format("Cloning %s. It can take a few minutes", buffer.repo))
+  M.info(vim.fn.system('echo "n" | gh repo fork ' .. buffer.repo .. " 2>&1 | cat "))
 end
 
-function M.notify(msg, kind)
-  vim.notify(msg, kind, { title = "Octo.nvim" })
+function M.notify(msg, level)
+  if level == 1 then
+    level = vim.log.levels.INFO
+  elseif level == 2 then
+    level = vim.log.levels.ERROR
+  else
+    level = vim.log.levels.INFO
+  end
+  vim.notify(msg, level, { title = "Octo.nvim" })
+end
+
+function M.info(msg)
+  vim.notify(msg, vim.log.levels.INFO, { title = "Octo.nvim" })
+end
+
+function M.error(msg)
+  vim.notify(msg, vim.log.levels.ERROR, { title = "Octo.nvim" })
 end
 
 function M.get_pull_request_for_current_branch(cb)
   gh.run {
     args = { "pr", "status", "--json", "id,number,headRepositoryOwner,headRepository" },
-    cb = function(output)
-      local pr = vim.fn.json_decode(output)
+    cb = function(out)
+      local pr = vim.fn.json_decode(out)
       if pr.currentBranch and pr.currentBranch.number then
         local number = pr.currentBranch.number
         local id = pr.currentBranch.id
@@ -997,8 +1071,7 @@ function M.get_pull_request_for_current_branch(cb)
             if stderr and not M.is_blank(stderr) then
               vim.api.nvim_err_writeln(stderr)
             elseif output then
-              local resp =
-                M.aggregate_pages(output, string.format("data.repository.%s.timelineItems.nodes", "pullRequest"))
+              local resp = M.aggregate_pages(output, "data.repository.pullRequest.timelineItems.nodes")
               local obj = resp.data.repository.pullRequest
               local Rev = require("octo.reviews.rev").Rev
               local PullRequest = require("octo.model.pull-request").PullRequest
@@ -1080,7 +1153,7 @@ function M.get_label_id(label)
   local bufnr = vim.api.nvim_get_current_buf()
   local buffer = octo_buffers[bufnr]
   if not buffer then
-    M.notify("Not in Octo buffer", 2)
+    M.error "Not in Octo buffer"
     return
   end
 
@@ -1125,6 +1198,12 @@ function M.generate_position2line_map(diffhunk)
       right_side_line = right_side_line + 1
       left_side_line = left_side_line + 1
     end
+  end
+  if left_offset == nil then
+    left_offset = 0
+  end
+  if right_offset == nil then
+    right_offset = 0
   end
   return {
     left_side_lines = left_side_lines,

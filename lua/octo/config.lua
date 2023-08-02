@@ -2,19 +2,42 @@ local M = {}
 
 M.defaults = {
   picker = "telescope",
+  picker_config = {
+    use_emojis = false,
+  },
   default_remote = { "upstream", "origin" },
   ssh_aliases = {},
   reaction_viewer_hint_icon = "",
   user_icon = " ",
   comment_icon = "▎",
-  outdated_icon = " ",
+  outdated_icon = "󰅒 ",
   resolved_icon = " ",
   timeline_marker = "",
   timeline_indent = "2",
   right_bubble_delimiter = "",
   left_bubble_delimiter = "",
   github_hostname = "",
+  use_local_fs = false,
+  enable_builtin = false,
   snippet_context_lines = 4,
+  gh_env = {},
+  timeout = 5000,
+  ui = {
+    use_signcolumn = true,
+  },
+  issues = {
+    order_by = {
+      field = "CREATED_AT",
+      direction = "DESC",
+    },
+  },
+  pull_requests = {
+    order_by = {
+      field = "CREATED_AT",
+      direction = "DESC",
+    },
+    always_select_remote_on_create = false,
+  },
   file_panel = {
     size = 10,
     use_icons = true,
@@ -104,6 +127,8 @@ M.defaults = {
       prev_comment = { lhs = "[c", desc = "go to previous comment" },
       select_next_entry = { lhs = "]q", desc = "move to previous changed file" },
       select_prev_entry = { lhs = "[q", desc = "move to next changed file" },
+      select_first_entry = { lhs = "[Q", desc = "move to first changed file" },
+      select_last_entry = { lhs = "]Q", desc = "move to last changed file" },
       close_review_tab = { lhs = "<C-c>", desc = "close review tab" },
       react_hooray = { lhs = "<space>rp", desc = "add/remove 🎉 reaction" },
       react_heart = { lhs = "<space>rh", desc = "add/remove ❤️ reaction" },
@@ -129,8 +154,11 @@ M.defaults = {
       prev_thread = { lhs = "[t", desc = "move to previous thread" },
       select_next_entry = { lhs = "]q", desc = "move to previous changed file" },
       select_prev_entry = { lhs = "[q", desc = "move to next changed file" },
+      select_first_entry = { lhs = "[Q", desc = "move to first changed file" },
+      select_last_entry = { lhs = "]Q", desc = "move to last changed file" },
       close_review_tab = { lhs = "<C-c>", desc = "close review tab" },
       toggle_viewed = { lhs = "<leader><space>", desc = "toggle viewer viewed state" },
+      goto_file = { lhs = "gf", desc = "go to file" },
     },
     file_panel = {
       next_entry = { lhs = "j", desc = "move to next changed file" },
@@ -141,6 +169,8 @@ M.defaults = {
       toggle_files = { lhs = "<leader>b", desc = "hide/show changed files panel" },
       select_next_entry = { lhs = "]q", desc = "move to previous changed file" },
       select_prev_entry = { lhs = "[q", desc = "move to next changed file" },
+      select_first_entry = { lhs = "[Q", desc = "move to first changed file" },
+      select_last_entry = { lhs = "]Q", desc = "move to last changed file" },
       close_review_tab = { lhs = "<C-c>", desc = "close review tab" },
       toggle_viewed = { lhs = "<leader><space>", desc = "toggle viewer viewed state" },
     },

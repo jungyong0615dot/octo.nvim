@@ -5,6 +5,7 @@ local previewers = require "octo.pickers.telescope.previewers"
 local entry_maker = require "octo.pickers.telescope.entry_maker"
 local reviews = require "octo.reviews"
 local utils = require "octo.utils"
+local octo_config = require "octo.config"
 
 local actions = require "telescope.actions"
 local action_set = require "telescope.actions.set"
@@ -109,7 +110,7 @@ local function copy_url()
     local entry = action_state.get_selected_entry(prompt_bufnr)
     local url = entry.obj.url
     vim.fn.setreg("+", url, "c")
-    utils.notify("Copied '" .. url .. "' to the system clipboard (+ register)", 1)
+    utils.info("Copied '" .. url .. "' to the system clipboard (+ register)")
   end
 end
 
@@ -126,24 +127,25 @@ function M.issues(opts)
     opts.repo = utils.get_remote_name()
   end
   if not opts.repo then
-    utils.notify("Cannot find repo", 2)
+    utils.error "Cannot find repo"
     return
   end
 
   local owner, name = utils.split_repo(opts.repo)
-  local query = graphql("issues_query", owner, name, filter, { escape = false })
-  print "Fetching issues (this may take a while) ..."
+  local cfg = octo_config.get_config()
+  local order_by = cfg.issues.order_by
+  local query = graphql("issues_query", owner, name, filter, order_by.field, order_by.direction, { escape = false })
+  utils.info "Fetching issues (this may take a while) ..."
   gh.run {
     args = { "api", "graphql", "--paginate", "--jq", ".", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
-      print " "
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = utils.aggregate_pages(output, "data.repository.issues.nodes")
         local issues = resp.data.repository.issues.nodes
         if #issues == 0 then
-          utils.notify(string.format("There are no matching issues in %s.", opts.repo), 2)
+          utils.error(string.format("There are no matching issues in %s.", opts.repo))
           return
         end
         local max_number = -1
@@ -214,7 +216,7 @@ function M.gists(opts)
     args = { "api", "graphql", "--paginate", "--jq", ".", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = utils.aggregate_pages(output, "data.viewer.gists.nodes")
         local gists = resp.data.viewer.gists.nodes
@@ -262,24 +264,26 @@ function M.pull_requests(opts)
     opts.repo = utils.get_remote_name()
   end
   if not opts.repo then
-    utils.notify("Cannot find repo", 2)
+    utils.error "Cannot find repo"
     return
   end
 
   local owner, name = utils.split_repo(opts.repo)
-  local query = graphql("pull_requests_query", owner, name, filter, { escape = false })
-  print "Fetching pull requests (this may take a while) ..."
+  local cfg = octo_config.get_config()
+  local order_by = cfg.pull_requests.order_by
+  local query =
+    graphql("pull_requests_query", owner, name, filter, order_by.field, order_by.direction, { escape = false })
+  utils.info "Fetching pull requests (this may take a while) ..."
   gh.run {
     args = { "api", "graphql", "--paginate", "--jq", ".", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
-      print " "
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = utils.aggregate_pages(output, "data.repository.pullRequests.nodes")
         local pull_requests = resp.data.repository.pullRequests.nodes
         if #pull_requests == 0 then
-          utils.notify(string.format("There are no matching pull requests in %s.", opts.repo), 2)
+          utils.error(string.format("There are no matching pull requests in %s.", opts.repo))
           return
         end
         local max_number = -1
@@ -330,7 +334,7 @@ function M.commits()
     args = { "api", url },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local results = vim.fn.json_decode(output)
         pickers
@@ -360,7 +364,7 @@ end
 function M.review_commits(callback)
   local current_review = require("octo.reviews").get_current_review()
   if not current_review then
-    utils.notify("No review in progress", 2)
+    utils.error "No review in progress"
     return
   end
   -- TODO: graphql
@@ -370,7 +374,7 @@ function M.review_commits(callback)
     args = { "api", url },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local results = vim.fn.json_decode(output)
 
@@ -434,7 +438,7 @@ function M.changed_files()
     args = { "api", url },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local results = vim.fn.json_decode(output)
         pickers
@@ -466,33 +470,33 @@ end
 ---
 function M.search(opts)
   opts = opts or {}
-
   local requester = function()
     return function(prompt)
       if not opts.prompt and utils.is_blank(prompt) then
         return {}
       end
-      if opts.prompt then
-        prompt = string.format("%s %s", opts.prompt, prompt)
+      if type(opts.prompt) == "string" then
+        opts.prompt = { opts.prompt }
       end
-      if opts.repo then
-        prompt = string.format("repo:%s %s", opts.repo, prompt)
-      end
-      local query = graphql("search_query", prompt)
-      local output = gh.run {
-        args = { "api", "graphql", "-f", string.format("query=%s", query) },
-        mode = "sync",
-      }
-      if output then
-        local resp = vim.fn.json_decode(output)
-        local results = {}
-        for _, issue in ipairs(resp.data.search.nodes) do
-          table.insert(results, issue)
+      local results = {}
+      for _, val in ipairs(opts.prompt) do
+        local _prompt = prompt
+        if val then
+          _prompt = string.format("%s %s", val, _prompt)
         end
-        return results
-      else
-        return {}
+        local query = graphql("search_query", _prompt)
+        local output = gh.run {
+          args = { "api", "graphql", "-f", string.format("query=%s", query) },
+          mode = "sync",
+        }
+        if output then
+          local resp = vim.fn.json_decode(output)
+          for _, issue in ipairs(resp.data.search.nodes) do
+            table.insert(results, issue)
+          end
+        end
       end
+      return results
     end
   end
   local finder = finders.new_dynamic {
@@ -566,7 +570,7 @@ function M.select_project_card(cb)
   local buffer = octo_buffers[bufnr]
   local cards = buffer.node.projectCards
   if not cards or #cards.nodes == 0 then
-    utils.notify("Cant find any project cards", 2)
+    utils.error "Cant find any project cards"
     return
   end
 
@@ -615,7 +619,7 @@ function M.select_target_project_column(cb)
         vim.list_extend(projects, user_projects)
         vim.list_extend(projects, org_projects)
         if #projects == 0 then
-          utils.notify(string.format("There are no matching projects for %s.", buffer.repo), 2)
+          utils.error(string.format("There are no matching projects for %s.", buffer.repo))
           return
         end
 
@@ -675,7 +679,7 @@ function M.select_label(cb)
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         local labels = resp.data.repository.labels.nodes
@@ -720,7 +724,7 @@ function M.select_assigned_label(cb)
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         local labels = resp.data.repository[key].labels.nodes
@@ -879,7 +883,7 @@ function M.select_assignee(cb)
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         local assignees = resp.data.repository[key].assignees.nodes
@@ -914,23 +918,22 @@ function M.repos(opts)
     if vim.g.octo_viewer then
       opts.login = vim.g.octo_viewer
     else
-      opts.login = require("octo.gh").get_user_name()
+      local remote_hostname = require("octo.utils").get_remote_host()
+      opts.login = require("octo.gh").get_user_name(remote_hostname)
     end
   end
-
   local query = graphql("repos_query", opts.login)
-  print "Fetching repositories (this may take a while) ..."
+  utils.info "Fetching repositories (this may take a while) ..."
   gh.run {
     args = { "api", "graphql", "--paginate", "--jq", ".", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
-      print " "
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = utils.aggregate_pages(output, "data.repositoryOwner.repositories.nodes")
         local repos = resp.data.repositoryOwner.repositories.nodes
         if #repos == 0 then
-          utils.notify(string.format("There are no matching repositories for %s.", opts.login), 2)
+          utils.error(string.format("There are no matching repositories for %s.", opts.login))
           return
         end
         local max_nameWithOwner = -1

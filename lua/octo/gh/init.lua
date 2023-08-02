@@ -23,23 +23,47 @@ local env_vars = {
   NO_COLOR = 1,
   http_proxy = vim.env["http_proxy"],
   https_proxy = vim.env["https_proxy"],
+  no_proxy = vim.env["no_proxy"],
 }
 
+local function get_env()
+  local env = env_vars
+  local gh_env = config.get_config().gh_env
+  if type(gh_env) == "function" then
+    local computed_env = gh_env()
+    if type(computed_env) == "table" then
+      env = vim.tbl_deep_extend("force", env, computed_env)
+    end
+  elseif type(gh_env) == "table" then
+    env = vim.tbl_deep_extend("force", env, gh_env)
+  end
+
+  return env
+end
+
 -- uses GH to get the name of the authenticated user
-function M.get_user_name()
+function M.get_user_name(remote_hostname)
+  if remote_hostname == nil then
+    remote_hostname = require("octo.utils").get_remote_host()
+  end
+
   local job = Job:new {
     enable_recording = true,
     command = "gh",
-    args = { "auth", "status" },
-    env = env_vars,
+    args = { "auth", "status", "--hostname", remote_hostname },
+    env = get_env(),
   }
   job:sync()
   local stderr = table.concat(job:stderr_result(), "\n")
-  local name = string.match(stderr, "Logged in to [^%s]+ as ([^%s]+)")
-  if name then
-    return name
+  local stdout = table.concat(job:result(), "\n")
+  local name_err = string.match(stderr, "Logged in to [^%s]+ as ([^%s]+)")
+  local name_out = string.match(stdout, "Logged in to [^%s]+ as ([^%s]+)")
+  if name_err then
+    return name_err
+  elseif name_out then
+    return name_out
   else
-    require("octo.utils").notify(stderr, 2)
+    require("octo.utils").error(stderr)
   end
 end
 
@@ -47,17 +71,17 @@ function M.run(opts)
   if not Job then
     return
   end
+  local remote_hostname = require("octo.utils").get_remote_host()
 
   -- Lazy load viewer name on the first gh command
   if not vim.g.octo_viewer then
-    vim.g.octo_viewer = M.get_user_name()
+    vim.g.octo_viewer = M.get_user_name(remote_hostname)
   end
 
   opts = opts or {}
   local conf = config.get_config()
   local mode = opts.mode or "async"
   local hostname = ""
-  local remote_hostname = require("octo.utils").get_remote_host()
   if opts.args[1] == "api" then
     table.insert(opts.args, "-H")
     table.insert(opts.args, "Accept: " .. table.concat(headers, ";"))
@@ -83,6 +107,11 @@ function M.run(opts)
     enable_recording = true,
     command = "gh",
     args = opts.args,
+    on_stdout = vim.schedule_wrap(function(err, data, _)
+      if mode == "async" and opts.stream_cb then
+        opts.stream_cb(data, err)
+      end
+    end),
     on_exit = vim.schedule_wrap(function(j_self, _, _)
       if mode == "async" and opts.cb then
         local output = table.concat(j_self:result(), "\n")
@@ -90,7 +119,7 @@ function M.run(opts)
         opts.cb(output, stderr)
       end
     end),
-    env = env_vars,
+    env = get_env(),
   }
   if mode == "sync" then
     job:sync()

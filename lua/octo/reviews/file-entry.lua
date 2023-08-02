@@ -175,6 +175,7 @@ function FileEntry:fetch()
   local left_sha = current_review.layout.left.commit
   local right_abbrev = current_review.layout.right:abbrev()
   local left_abbrev = current_review.layout.left:abbrev()
+  local conf = config.get_config()
 
   -- handle renamed files
   if self.status == "R" and self.previous_path then
@@ -204,7 +205,7 @@ function FileEntry:fetch()
   end
 
   -- wait until we have both versions
-  return vim.wait(5000, function()
+  return vim.wait(conf.timeout, function()
     return self.left_lines and self.right_lines
   end)
 end
@@ -234,10 +235,8 @@ function FileEntry:load_buffers(left_winid, right_winid)
   -- configure diff buffers
   for _, split in ipairs(splits) do
     if not split.bufid or not vim.api.nvim_buf_is_loaded(split.bufid) then
-      local use_local = false
-      if split.pos == "right" and utils.in_pr_branch(self.pull_request.bufnr) then
-        use_local = true
-      end
+      local conf = config.get_config()
+      local use_local = conf.use_local_fs and split.pos == "right" and utils.in_pr_branch(self.pull_request.bufnr)
 
       -- create buffer
       split.bufid = M._create_buffer {
@@ -391,28 +390,27 @@ end
 function M._create_buffer(opts)
   local current_review = require("octo.reviews").get_current_review()
   local bufnr
-  --if opts.use_local then
-  -- TODO: should we use the file from the file system
-  -- Pros: LSP powered
-  -- Cons: we need to change to the commit branch
-  -- For now, lets just load the contents from git object (`git show commit:path`)
-  --bufnr = vim.fn.bufadd(opts.path)
-  --else
-  bufnr = vim.api.nvim_create_buf(false, false)
-  local bufname =
-    string.format("octo://%s/review/%s/file/%s/%s", opts.repo, current_review.id, string.upper(opts.split), opts.path)
-  vim.api.nvim_buf_set_name(bufnr, bufname)
-  if opts.binary then
-    vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "Binary file" })
-  elseif opts.status == "R" and not opts.show_diff then
-    vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "Renamed" })
-  elseif opts.lines then
-    vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, opts.lines)
+  if opts.use_local then
+    -- Use the file from the file system
+    -- Pros: LSP powered
+    -- Cons: we need to change to the commit branch
+    bufnr = vim.fn.bufadd(opts.path)
+  else
+    bufnr = vim.api.nvim_create_buf(false, false)
+    local bufname =
+      string.format("octo://%s/review/%s/file/%s/%s", opts.repo, current_review.id, string.upper(opts.split), opts.path)
+    vim.api.nvim_buf_set_name(bufnr, bufname)
+    if opts.binary then
+      vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "Binary file" })
+    elseif opts.status == "R" and not opts.show_diff then
+      vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "Renamed" })
+    elseif opts.lines then
+      vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, opts.lines)
+    end
   end
-  --end
   vim.api.nvim_buf_set_option(bufnr, "modified", false)
   vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
   vim.api.nvim_buf_set_var(bufnr, "octo_diff_props", {

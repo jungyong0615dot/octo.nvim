@@ -26,9 +26,10 @@ function M.gen_from_issue(max_number, print_repo)
         },
       }
     else
+      local icon = entry.kind == "issue" and "" or ""
       columns = {
         { entry.value, "TelescopeResultsNumber" },
-        { entry.obj.title },
+        { icon .. " " .. entry.obj.title },
       }
       layout = {
         separator = " ",
@@ -440,7 +441,7 @@ function M.gen_from_repo(max_nameWithOwner, max_forkCount, max_stargazerCount)
       value = repo.nameWithOwner,
       ordinal = repo.nameWithOwner .. " " .. repo.description,
       display = make_display,
-      repo = repo.nameWithOwner,
+      repo = repo,
     }
   end
 end

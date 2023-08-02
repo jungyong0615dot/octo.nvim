@@ -156,7 +156,10 @@ function M.write_repo(bufnr, repo)
   end
 
   utils.get_file_contents(repo.nameWithOwner, repo.defaultBranchRef.name, "README.md", function(lines)
-    vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, lines)
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, lines)
+      vim.api.nvim_buf_set_option(bufnr, "modified", false)
+    end
   end)
 end
 
@@ -186,7 +189,7 @@ function M.write_state(bufnr, state, number)
   -- title virtual text
   local title_vt = {
     { tostring(number), "OctoIssueId" },
-    { string.format(" [%s] ", state), utils.state_hl_map[state] .. "Float" },
+    { string.format(" [%s] ", state), utils.state_hl_map[state] },
   }
 
   -- PR virtual text
@@ -249,13 +252,11 @@ function M.write_details(bufnr, issue, update)
   local buffer = octo_buffers[bufnr]
 
   -- repo
-  if buffer then
-    local repo_vt = {
-      { "Repo: ", "OctoDetailsLabel" },
-      { " " .. buffer.repo, "OctoDetailsValue" },
-    }
-    table.insert(details, repo_vt)
-  end
+  local repo_vt = {
+    { "Repo: ", "OctoDetailsLabel" },
+    { " " .. utils.parse_url(issue.url), "OctoDetailsValue" },
+  }
+  table.insert(details, repo_vt)
 
   -- author
   local author_vt = { { "Created by: ", "OctoDetailsLabel" } }
@@ -347,7 +348,13 @@ function M.write_details(bufnr, issue, update)
       end
       --end
     end
+    local timeline_nodes = {}
     for _, item in ipairs(issue.timelineItems.nodes) do
+      if item ~= vim.NIL then
+        table.insert(timeline_nodes, item)
+      end
+    end
+    for _, item in ipairs(timeline_nodes) do
       if item.__typename == "PullRequestReview" then
         local name = item.author.login
         collect_reviewer(name, item.state)

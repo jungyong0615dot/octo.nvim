@@ -7,6 +7,7 @@ local reviews = require "octo.reviews"
 local window = require "octo.ui.window"
 local writers = require "octo.ui.writers"
 local utils = require "octo.utils"
+local config = require "octo.config"
 
 local M = {}
 
@@ -43,10 +44,14 @@ function M.setup()
       search = function(repo, ...)
         local opts = M.process_varargs(repo, ...)
         if utils.is_blank(opts.repo) then
-          utils.notify("Cannot find repo", 2)
+          utils.error "Cannot find repo"
           return
         end
-        opts.prompt = "is:issue "
+        local prompt = "is:issue "
+        for k, v in pairs(opts) do
+          prompt = prompt .. k .. ":" .. v .. " "
+        end
+        opts.prompt = prompt
         picker.search(opts)
       end,
       reload = function()
@@ -108,10 +113,14 @@ function M.setup()
       search = function(repo, ...)
         local opts = M.process_varargs(repo, ...)
         if utils.is_blank(opts.repo) then
-          utils.notify("Cannot find repo", 2)
+          utils.error "Cannot find repo"
           return
         end
-        opts.prompt = "is:pr "
+        local prompt = "is:pr "
+        for k, v in pairs(opts) do
+          prompt = prompt .. k .. ":" .. v .. " "
+        end
+        opts.prompt = prompt
         picker.search(opts)
       end,
       reload = function()
@@ -270,6 +279,9 @@ function M.setup()
       rocket = function()
         M.reaction_action "ROCKET"
       end,
+      heart = function()
+        M.reaction_action "HEART"
+      end,
     },
     card = {
       add = function()
@@ -297,7 +309,14 @@ function M.process_varargs(repo, ...)
   local opts = {}
   for i = 1, args.n do
     local kv = vim.split(args[i], "=")
-    opts[kv[1]] = kv[2]
+    if #kv == 2 then
+      opts[kv[1]] = kv[2]
+    else
+      kv = vim.split(args[i], ":")
+      if #kv == 2 then
+        opts[kv[1]] = kv[2]
+      end
+    end
   end
   opts.repo = repo
   return opts
@@ -305,7 +324,11 @@ end
 
 function M.octo(object, action, ...)
   if not object then
-    utils.notify("Missing arguments", 1)
+    if config.get_config().enable_builtin then
+      M.commands.actions()
+    else
+      utils.error "Missing arguments"
+    end
     return
   end
   local o = M.commands[object]
@@ -316,7 +339,7 @@ function M.octo(object, action, ...)
     elseif repo and number and kind == "pull" then
       utils.get_pull_request(repo, number)
     else
-      utils.notify("Incorrect argument, valid objects are:" .. vim.inspect(vim.tbl_keys(M.commands)), 1)
+      utils.error("Incorrect argument: " .. object)
       return
     end
   else
@@ -331,7 +354,7 @@ function M.octo(object, action, ...)
 
     local a = o[action]
     if not a then
-      utils.notify("Incorrect action, valid actions are:" .. vim.inspect(vim.tbl_keys(o)), 1)
+      utils.error("Incorrect action: " .. action)
       return
     else
       a(...)
@@ -383,7 +406,7 @@ function M.add_comment()
   elseif utils.is_blank(_thread) and not buffer:isReviewThread() then
     comment_kind = "IssueComment"
   elseif utils.is_blank(_thread) and buffer:isReviewThread() then
-    utils.notify("Error adding a comment to a review thread", 1)
+    utils.error "Error adding a comment to a review thread"
   end
 
   if comment_kind == "IssueComment" then
@@ -411,7 +434,7 @@ function M.delete_comment()
   local start_line = comment.bufferStartLine
   local end_line = comment.bufferEndLine
   if not comment then
-    utils.notify("The cursor does not seem to be located at any comment", 1)
+    utils.error "The cursor does not seem to be located at any comment"
     return
   end
   local query, threadId
@@ -452,7 +475,7 @@ function M.delete_comment()
           end
           buffer.commentsMetadata = updated
         else
-          utils.notify("ERROR deleting buffer" .. tostring(bufnr), 1)
+          utils.error("Deleting buffer" .. tostring(bufnr))
         end
 
         if comment.kind == "PullRequestReviewComment" then
@@ -527,7 +550,7 @@ function M.resolve_thread()
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         local thread = resp.data.resolveReviewThread.thread
@@ -571,7 +594,7 @@ function M.unresolve_thread()
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         local thread = resp.data.unresolveReviewThread.thread
@@ -605,7 +628,7 @@ function M.change_state(state)
   end
 
   if not state then
-    utils.notify("Missing argument: state", 2)
+    utils.error "Missing argument: state"
     return
   end
 
@@ -621,7 +644,7 @@ function M.change_state(state)
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         local new_state, obj
@@ -636,7 +659,7 @@ function M.change_state(state)
           buffer.node.state = new_state
           writers.write_state(bufnr, new_state:upper(), buffer.number)
           writers.write_details(bufnr, obj, true)
-          utils.notify("Issue state changed to: " .. new_state, 1)
+          utils.info("Issue state changed to: " .. new_state)
         end
       end
     end,
@@ -648,7 +671,7 @@ function M.create_issue(repo)
     repo = utils.get_remote_name()
   end
   if not repo then
-    utils.notify("Cant find repo name", 1)
+    utils.error "Cant find repo name"
     return
   end
 
@@ -699,7 +722,7 @@ function M.save_issue(opts)
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         require("octo").create_buffer("issue", resp.data.createIssue.issue, opts.repo, true)
@@ -712,10 +735,31 @@ end
 
 function M.create_pr(is_draft)
   is_draft = "draft" == is_draft and true or false
-  local repo = utils.get_remote_name()
-  if not repo then
-    utils.notify("Cant find repo name", 1)
-    return
+  local conf = config.get_config()
+  local select = conf.pull_requests.always_select_remote_on_create or false
+
+  local repo
+  if select then
+    local remotes = utils.get_all_remotes()
+    local remote_entries = { "Select base repo," }
+    for idx, remote in ipairs(remotes) do
+      table.insert(remote_entries, idx .. ". " .. remote.repo)
+    end
+    local remote_idx = vim.fn.inputlist(remote_entries)
+    if remote_idx < 1 then
+      utils.error "Aborting PR creation"
+      return
+    elseif remote_idx > #remotes then
+      utils.error "Invaild index."
+      return
+    end
+    repo = remotes[remote_idx].repo
+  else
+    repo = utils.get_remote_name()
+    if not repo then
+      utils.error "Cant find repo name"
+      return
+    end
   end
 
   -- get repo info
@@ -745,7 +789,7 @@ function M.create_pr(is_draft)
   local remote_branch = local_branch
   if not remote_branch_exists then
     local choice =
-    vim.fn.confirm("Remote branch '" .. local_branch .. "' does not exist. Push local one?", "&Yes\n&No\n&Cancel", 2)
+      vim.fn.confirm("Remote branch '" .. local_branch .. "' does not exist. Push local one?", "&Yes\n&No\n&Cancel", 2)
     if choice == 1 then
       local remote = "origin"
       remote_branch = vim.fn.input {
@@ -755,7 +799,7 @@ function M.create_pr(is_draft)
           return { { 0, #input, "String" } }
         end,
       }
-      utils.notify(string.format("Pushing '%s' to '%s:%s' ...", local_branch, remote, remote_branch), 1)
+      utils.info(string.format("Pushing '%s' to '%s:%s' ...", local_branch, remote, remote_branch))
       local ok, Job = pcall(require, "plenary.job")
       if ok then
         local job = Job:new {
@@ -767,15 +811,14 @@ function M.create_pr(is_draft)
         --local stdout = table.concat(job:result(), "\n")
         local stderr = table.concat(job:stderr_result(), "\n")
         if not utils.is_blank(stderr) then
-          print(stderr)
-          print ""
+          utils.error(stderr)
         end
       else
-        utils.notify("Aborting PR creation", 2)
+        utils.error "Aborting PR creation"
         return
       end
     else
-      utils.notify("Aborting PR creation", 2)
+      utils.error "Aborting PR creation"
       return
     end
   end
@@ -875,11 +918,11 @@ function M.save_pr(opts)
       args = { "api", "graphql", "-f", string.format("query=%s", query) },
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
-          utils.notify(stderr, 2)
+          utils.error(stderr)
         elseif output then
           local resp = vim.fn.json_decode(output)
           local pr = resp.data.createPullRequest.pullRequest
-          utils.notify(string.format("#%d - `%s` created successfully", pr.number, pr.title), 1)
+          utils.info(string.format("#%d - `%s` created successfully", pr.number, pr.title))
           require("octo").create_buffer("pull", pr, opts.repo, true)
           vim.fn.execute "normal! Gk"
           vim.fn.execute "startinsert"
@@ -898,8 +941,8 @@ function M.pr_ready_for_review()
   gh.run {
     args = { "pr", "ready", tostring(buffer.number) },
     cb = function(output, stderr)
-      utils.notify(output, 1)
-      utils.notify(stderr, 2)
+      utils.info(output)
+      utils.error(stderr)
       writers.write_state(bufnr)
     end,
   }
@@ -915,7 +958,7 @@ function M.pr_checks()
     args = { "pr", "checks", tostring(buffer.number), "-R", buffer.repo },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local max_lengths = {}
         local parts = {}
@@ -985,7 +1028,7 @@ function M.merge_pr(...)
   gh.run {
     args = args,
     cb = function(output, stderr)
-      utils.notify("[Octo] " .. output .. " " .. stderr, 1)
+      utils.info(output .. " " .. stderr)
       writers.write_state(bufnr)
     end,
   }
@@ -1003,7 +1046,7 @@ function M.show_pr_diff()
     headers = { "Accept: application/vnd.github.v3.diff" },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local lines = vim.split(output, "\n")
         local wbufnr = vim.api.nvim_create_buf(true, true)
@@ -1084,7 +1127,7 @@ function M.reaction_action(reaction)
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         if action == "add" then
@@ -1124,7 +1167,7 @@ function M.add_project_card()
       args = { "api", "graphql", "--paginate", "-f", string.format("query=%s", query) },
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
-          utils.notify(stderr, 2)
+          utils.error(stderr)
         elseif output then
           -- refresh issue/pr details
           require("octo").load(buffer.repo, buffer.kind, buffer.number, function(obj)
@@ -1152,7 +1195,7 @@ function M.remove_project_card()
       args = { "api", "graphql", "--paginate", "-f", string.format("query=%s", query) },
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
-          utils.notify(stderr, 2)
+          utils.error(stderr)
         elseif output then
           -- refresh issue/pr details
           require("octo").load(buffer.repo, buffer.kind, buffer.number, function(obj)
@@ -1181,7 +1224,7 @@ function M.move_project_card()
         args = { "api", "graphql", "--paginate", "-f", string.format("query=%s", query) },
         cb = function(output, stderr)
           if stderr and not utils.is_blank(stderr) then
-            utils.notify(stderr, 2)
+            utils.error(stderr)
           elseif output then
             -- refresh issue/pr details
             require("octo").load(buffer.repo, buffer.kind, buffer.number, function(obj)
@@ -1238,11 +1281,11 @@ function M.create_label(label)
     args = { "api", "graphql", "-f", string.format("query=%s", query) },
     cb = function(output, stderr)
       if stderr and not utils.is_blank(stderr) then
-        utils.notify(stderr, 2)
+        utils.error(stderr)
       elseif output then
         local resp = vim.fn.json_decode(output)
         local label = resp.data.createLabel.label
-        utils.notify("Created label: " .. label.name, 1)
+        utils.info("Created label: " .. label.name)
 
         -- refresh issue/pr details
         require("octo").load(buffer.repo, buffer.kind, buffer.number, function(obj)
@@ -1262,7 +1305,7 @@ function M.add_label(label)
 
   local iid = buffer.node.id
   if not iid then
-    utils.notify("Cannot get issue/pr id", 2)
+    utils.error "Cannot get issue/pr id"
   end
 
   local cb = function(label_id)
@@ -1271,7 +1314,7 @@ function M.add_label(label)
       args = { "api", "graphql", "-f", string.format("query=%s", query) },
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
-          utils.notify(stderr, 2)
+          utils.error(stderr)
         elseif output then
           -- refresh issue/pr details
           require("octo").load(buffer.repo, buffer.kind, buffer.number, function(obj)
@@ -1286,7 +1329,7 @@ function M.add_label(label)
     if label_id then
       cb(label_id)
     else
-      utils.notify("Cannot find label: " .. label, 2)
+      utils.error("Cannot find label: " .. label)
     end
   else
     picker.labels(cb)
@@ -1302,7 +1345,7 @@ function M.remove_label(label)
 
   local iid = buffer.node.id
   if not iid then
-    utils.notify("Cannot get issue/pr id", 2)
+    utils.error "Cannot get issue/pr id"
   end
 
   local cb = function(label_id)
@@ -1311,7 +1354,7 @@ function M.remove_label(label)
       args = { "api", "graphql", "-f", string.format("query=%s", query) },
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
-          utils.notify(stderr, 2)
+          utils.error(stderr)
         elseif output then
           -- refresh issue/pr details
           require("octo").load(buffer.repo, buffer.kind, buffer.number, function(obj)
@@ -1327,7 +1370,7 @@ function M.remove_label(label)
     if label_id then
       cb(label_id)
     else
-      utils.notify("Cannot find label: " .. label, 2)
+      utils.error("Cannot find label: " .. label)
     end
   else
     picker.assigned_labels(cb)
@@ -1343,7 +1386,7 @@ function M.add_user(subject, login)
 
   local iid = buffer.node.id
   if not iid then
-    utils.notify("Cannot get issue/pr id", 2)
+    utils.error "Cannot get issue/pr id"
   end
 
   local cb = function(user_id)
@@ -1357,7 +1400,7 @@ function M.add_user(subject, login)
       args = { "api", "graphql", "--paginate", "-f", string.format("query=%s", query) },
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
-          utils.notify(stderr, 2)
+          utils.error(stderr)
         elseif output then
           -- refresh issue/pr details
           require("octo").load(buffer.repo, buffer.kind, buffer.number, function(obj)
@@ -1373,7 +1416,7 @@ function M.add_user(subject, login)
     if user_id then
       cb(user_id)
     else
-      utils.notify("User not found", 2)
+      utils.error "User not found"
     end
   else
     picker.users(cb)
@@ -1389,7 +1432,7 @@ function M.remove_assignee(login)
 
   local iid = buffer.node.id
   if not iid then
-    utils.notify("Cannot get issue/pr id", 2)
+    utils.error "Cannot get issue/pr id"
   end
 
   local cb = function(user_id)
@@ -1398,7 +1441,7 @@ function M.remove_assignee(login)
       args = { "api", "graphql", "--paginate", "-f", string.format("query=%s", query) },
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
-          utils.notify(stderr, 2)
+          utils.error(stderr)
         elseif output then
           -- refresh issue/pr details
           require("octo").load(buffer.repo, buffer.kind, buffer.number, function(obj)
@@ -1413,10 +1456,10 @@ function M.remove_assignee(login)
     if user_id then
       cb(user_id)
     else
-      utils.notify("User not found", 2)
+      utils.error "User not found"
     end
   else
-    picker.assignees()
+    picker.assignees(cb)
   end
 end
 
@@ -1428,7 +1471,7 @@ function M.copy_url()
   end
   local url = buffer.node.url
   vim.fn.setreg("+", url, "c")
-  utils.notify("Copied URL '" .. url .. "' to the system clipboard (+ register)", 1)
+  utils.info("Copied URL '" .. url .. "' to the system clipboard (+ register)")
 end
 
 function M.actions()

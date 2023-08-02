@@ -2096,7 +2096,7 @@ query {
 M.issues_query = [[
 query($endCursor: String) {
   repository(owner: "%s", name: "%s") {
-    issues(first: 100, after: $endCursor, filterBy: {%s}) {
+    issues(first: 100, after: $endCursor, filterBy: {%s}, orderBy: {field: %s, direction: %s}) {
       nodes {
         __typename
         number
@@ -2115,7 +2115,7 @@ query($endCursor: String) {
 M.pull_requests_query = [[
 query($endCursor: String) {
   repository(owner: "%s", name: "%s") {
-    pullRequests(first: 100, after: $endCursor, %s) {
+    pullRequests(first: 100, after: $endCursor, %s, orderBy: {field: %s, direction: %s}) {
       nodes {
         __typename
         number
@@ -2564,7 +2564,7 @@ query($endCursor: String) {
 M.repos_query = [[
 query($endCursor: String) {
   repositoryOwner(login: "%s") {
-    repositories(first: 100, after: $endCursor, ownerAffiliations: [COLLABORATOR, ORGANIZATION_MEMBER, OWNER]) {
+    repositories(first: 10, after: $endCursor, ownerAffiliations: [COLLABORATOR, ORGANIZATION_MEMBER, OWNER]) {
       nodes {
         createdAt
         description

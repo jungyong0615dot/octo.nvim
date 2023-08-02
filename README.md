@@ -46,6 +46,7 @@ Edit and review GitHub issues and pull requests from the comfort of your favorit
 * [📋 PR reviews](#-pr-reviews)
 * [🍞 Completion](#-completion)
 * [🎨 Colors](#-colors)
+* [🏷️  Status Column](#-statuscolumn)
 * [🙋 FAQ](#-faq)
 * [✋ Contributing](#-contributing)
 * [📜 License](#-license)
@@ -62,7 +63,7 @@ Edit and review GitHub issues and pull requests from the comfort of your favorit
 - Install [GitHub CLI](https://cli.github.com/)
 - Install [plenary.nvim](https://github.com/nvim-lua/plenary.nvim)
 - Install [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim)
-- Install [nvim-web-devicons](https://github.com/kyazdani42/nvim-web-devicons)
+- Install [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons)
 
 ## 📦 Installation
 
@@ -74,7 +75,7 @@ use {
   requires = {
     'nvim-lua/plenary.nvim',
     'nvim-telescope/telescope.nvim',
-    'kyazdani42/nvim-web-devicons',
+    'nvim-tree/nvim-web-devicons',
   },
   config = function ()
     require"octo".setup()
@@ -86,16 +87,36 @@ use {
 
 ```lua
 require"octo".setup({
+  use_local_fs = false,                    -- use local files on right side of reviews
+  enable_builtin = false,                  -- shows a list of builtin actions when no action is provided
   default_remote = {"upstream", "origin"}; -- order to try remotes
   ssh_aliases = {},                        -- SSH aliases. e.g. `ssh_aliases = {["github.com-work"] = "github.com"}`
   reaction_viewer_hint_icon = "";         -- marker for user reactions
   user_icon = " ";                        -- user icon
   timeline_marker = "";                   -- timeline marker
   timeline_indent = "2";                   -- timeline indentation
-  right_bubble_delimiter = "";            -- Bubble delimiter
-  left_bubble_delimiter = "";             -- Bubble delimiter
+  right_bubble_delimiter = "";            -- bubble delimiter
+  left_bubble_delimiter = "";             -- bubble delimiter
   github_hostname = "";                    -- GitHub Enterprise host
   snippet_context_lines = 4;               -- number or lines around commented lines
+  gh_env = {},                             -- extra environment variables to pass on to GitHub CLI, can be a table or function returning a table
+  timeout = 5000,                          -- timeout for requests between the remote server
+  ui = {
+    use_signcolumn = true,                 -- show "modified" marks on the sign column
+  },
+  issues = {
+    order_by = {                           -- criteria to sort results of `Octo issue list`
+      field = "CREATED_AT",                -- either COMMENTS, CREATED_AT or UPDATED_AT (https://docs.github.com/en/graphql/reference/enums#issueorderfield)
+      direction = "DESC"                   -- either DESC or ASC (https://docs.github.com/en/graphql/reference/enums#orderdirection)
+    }
+  },
+  pull_requests = {
+    order_by = {                           -- criteria to sort the results of `Octo pr list`
+      field = "CREATED_AT",                -- either COMMENTS, CREATED_AT or UPDATED_AT (https://docs.github.com/en/graphql/reference/enums#issueorderfield)
+      direction = "DESC"                   -- either DESC or ASC (https://docs.github.com/en/graphql/reference/enums#orderdirection)
+    },
+    always_select_remote_on_create = "false" -- always give prompt to select base remote repo when creating PRs
+  },
   file_panel = {
     size = 10,                             -- changed files panel rows
     use_icons = true                       -- use web-devicons in file panel (if false, nvim-web-devicons does not need to be installed)
@@ -198,6 +219,7 @@ require"octo".setup({
       select_prev_entry = { lhs = "[q", desc = "move to next changed file" },
       close_review_tab = { lhs = "<C-c>", desc = "close review tab" },
       toggle_viewed = { lhs = "<leader><space>", desc = "toggle viewer viewed state" },
+      goto_file = { lhs = "gf", desc = "go to file" },
     },
     file_panel = {
       next_entry = { lhs = "j", desc = "move to next changed file" },
@@ -255,6 +277,7 @@ If no command is passed, the argument to `Octo` is treated as a URL from where a
 | | fork | Fork repo |
 | | browser | Open current repo in the browser|
 | | url | Copies the URL of the current repo to the system clipboard|
+| | view | Open a repo by path ({organization}/{name})|
 | gist | list [repo] [key=value] (4) | List user gists |
 | comment | add | Add a new comment |
 | | delete | Delete a comment |
@@ -263,7 +286,7 @@ If no command is passed, the argument to `Octo` is treated as a URL from where a
 | label | add [label] | Add a label from available label menu |
 | | remove [label] | Remove a label |
 | | create [label] | Create a new label |
-| assignees| add [login] | Assign a user |
+| assignee| add [login] | Assign a user |
 | | remove [login] | Unassign a user |
 | reviewer | add [login] | Assign a PR reviewer |
 | reaction | `thumbs_up` \| `+1` | Add 👍 reaction|
@@ -283,6 +306,7 @@ If no command is passed, the argument to `Octo` is treated as a URL from where a
 | | discard| Deletes a pending review for current PR if any |
 | | comments| View pending review comments |
 | | commit | Pick a specific commit to review |
+| | close | Close the review window and return to the PR |
 | actions |  | Lists all available Octo actions|
 | search | <query> | Search GitHub for issues and PRs matching the [query](https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests) |
 
@@ -339,7 +363,7 @@ Octo issue list neovim/neovim labels=bug,help\ wanted states=OPEN
 Octo search assignee:pwntester is:pr
 ```
 
-## 📋 PR review
+## 📋 PR reviews
 
 - Open the PR (eg: `Octo <PR url>` or `Octo pr list` or `Octo pr edit <PR number>`)
 - Start a review with `Octo review start` or resume a pending review with `Octo review resume`
@@ -403,6 +427,62 @@ Octo provides a built-in omnifunc completion for issues, PRs and users that you 
 The term `GitHub color` refers to the colors used in the WebUI.
 The (addition) `viewer` means the user of the plugin or more precisely the user authenticated via the `gh` CLI tool used to retrieve the data from GitHub.
 
+## 🏷️  Status Column
+If you are using the `vim.opt.statuscolumn` feature, you can disable Octo's comment marks in the `signcolumn` and replace them with any customizations on the `statuscolumn`.
+
+Disable the `signcolumn` with:
+
+```lua
+ui = {
+    use_signcolumn = false
+}
+```
+
+Then, provide a `statuscolumn` replacement such as:
+
+```lua
+local function mk_hl(group, sym)
+  return table.concat({ "%#", group, "#", sym, "%*" })
+end
+
+_G.get_statuscol_octo = function(bufnum, lnum)
+  if vim.api.nvim_buf_get_option(bufnum, "filetype") == "octo" then
+    if type(octo_buffers) == "table" then
+      local buffer = octo_buffers[bufnum]
+      if buffer then
+        buffer:update_metadata()
+        local hl = "OctoSignColumn"
+        local metadatas = {buffer.titleMetadata, buffer.bodyMetadata}
+        for _, comment_metadata in ipairs(buffer.commentsMetadata) do
+          table.insert(metadatas, comment_metadata)
+        end
+        for _, metadata in ipairs(metadatas) do
+          if metadata and metadata.startLine and metadata.endLine then
+            if metadata.dirty then
+              hl = "OctoDirty"
+            else
+              hl = "OctoSignColumn"
+            end
+            if lnum - 1 == metadata.startLine and lnum - 1 == metadata.endLine then
+              return mk_hl(hl, "[ ")
+            elseif lnum - 1 == metadata.startLine then
+              return mk_hl(hl, "┌ ")
+            elseif lnum - 1 == metadata.endLine then
+              return mk_hl(hl, "└ ")
+            elseif metadata.startLine < lnum - 1 and lnum - 1 < metadata.endLine then
+              return mk_hl(hl, "│ ")
+            end
+          end
+        end
+      end
+    end
+  end
+  return "  "
+end
+
+vim.opt.statuscolumn = "%{%v:lua.get_statuscol_octo(bufnr(), v:lnum)%}"
+```
+
 ## 🙋 FAQ
 
 **How can I disable bubbles for XYZ?**
@@ -432,8 +512,7 @@ GITHUB_TOKEN= gh auth login
 Just add the following lines to your TreeSitter config:
 
 ```lua
-local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
-parser_config.markdown.filetype_to_parsername = "octo"
+vim.treesitter.language.register('markdown', 'octo')
 ```
 
 **How can I filter PRs by filter keys that aren't available?**
@@ -453,8 +532,8 @@ Note: You need to provide the `repo`, otherwise it will search for every PR by t
 **How to enable autocompletion for issues/prs (`#`) and users (`@`)?**
 
 Add the following mappings for `octo` file type:
-- `vim.api.nvim_buf_set_keymap(0, "i", "@", "@<C-x><C-o>", { silent = true, noremap = true })`
-- `vim.api.nvim_buf_set_keymap(0, "i", "#", "#<C-x><C-o>", { silent = true, noremap = true })`
+- `vim.keymap.set("i", "@", "@<C-x><C-o>", { silent = true, buffer = true })`
+- `vim.keymap.set("i", "#", "#<C-x><C-o>", { silent = true, buffer = true })`
 
 ## ✋ Contributing
 
@@ -462,7 +541,7 @@ Contributions are always welcome!
 
 See [`CONTRIBUTING`](/CONTRIBUTING.md) for ways to get started.
 
-Please adhere to this project's [`CODE_OF_CONDUCT`](/CODE_OF_CONDUCT).
+Please adhere to this project's [`CODE_OF_CONDUCT`](/CODE_OF_CONDUCT.md).
 
 ## 🌟 Credits
 The PR review panel is heavily inspired in [diffview.nvim](https://github.com/sindrets/diffview.nvim)
